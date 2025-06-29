@@ -1,0 +1,17 @@
+{
+  "name": "strahn-pi-system-pyteal",
+  "version": "1.0.0",
+  "description": "PyTEAL implementation of the Strahn PI payment system",
+  "main": "index.js",
+  "scripts": {
+    "test": "python -m pytest tests/ -v",
+    "compile": "python scripts/compile_contracts.py",
+    "deploy": "python scripts/deploy_contracts.py"
+  },
+  "keywords": ["algorand", "pyteal", "smart-contracts", "payments", "web3"],
+  "author": "Strahn Team",
+  "license": "MIT",
+  "dependencies": {
+    "py-algorand-sdk": "^2.0.0"
+  }
+}
