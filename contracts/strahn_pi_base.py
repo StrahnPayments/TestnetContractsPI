@@ -10,7 +10,8 @@ def is_creator():
 def app_optin_usdc():
     """Opt the contract into USDC asset"""
     return Seq([
-        Assert(Txn.sender() == Global.creator_address()),
+        # FIXED: Use stored creator_addr instead of Global.creator_address()
+        Assert(Txn.sender() == App.globalGet(Bytes("creator_addr"))),
         
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
@@ -30,13 +31,35 @@ def deposit_usdc():
     payment_txn_index = Txn.group_index() - Int(1)
     
     return Seq([
+        # Enhanced group validation
         Assert(Global.group_size() == Int(2)),
+        Assert(Txn.group_index() == Int(1)),  # This call must be second
+        Assert(payment_txn_index == Int(0)),  # Payment must be first
+        
+        # Validate payment transaction
         Assert(Gtxn[payment_txn_index].type_enum() == TxnType.AssetTransfer),
         Assert(Gtxn[payment_txn_index].xfer_asset() == App.globalGet(Bytes("usdc_id"))),
         Assert(Gtxn[payment_txn_index].asset_receiver() == Global.current_application_address()),
         Assert(Gtxn[payment_txn_index].asset_amount() > Int(0)),
         
+        # Validate sender consistency
+        Assert(Gtxn[payment_txn_index].sender() == Txn.sender()),
+        
         Log(Concat(Bytes("usdc_deposited:"), Itob(Gtxn[payment_txn_index].asset_amount()))),
+    ])
+
+@Subroutine(TealType.none)
+def validate_balance(required_amount: Expr):
+    """Validate contract has sufficient USDC balance"""
+    contract_balance = AssetHolding.balance(
+        Global.current_application_address(),
+        App.globalGet(Bytes("usdc_id"))
+    )
+    
+    return Seq([
+        contract_balance,
+        Assert(contract_balance.hasValue()),
+        Assert(contract_balance.value() >= required_amount),
     ])
 
 @Subroutine(TealType.none)
@@ -48,9 +71,10 @@ def process_intent():
     nonce = Btoi(Txn.application_args[4])
     signature = Txn.application_args[5]
     
-    # Construct message for signature verification
+    # FIXED: Add domain separation with contract address to prevent replay
     message = Concat(
         Bytes("SPP_V1:"),
+        Itob(Global.current_application_id()),  # Domain separation
         Itob(nonce),
         destination,
         Itob(amount),
@@ -58,8 +82,15 @@ def process_intent():
     )
     
     current_nonce = App.globalGet(Bytes("creator_nonce"))
+    total_amount = amount + relayer_fee
     
     return Seq([
+        # Input validation
+        Assert(Len(destination) == Int(32)),  # Valid address
+        Assert(amount > Int(0)),  # Positive amount
+        Assert(relayer_fee >= Int(0)),  # Non-negative fee
+        Assert(total_amount > amount),  # Overflow check
+        
         # Verify nonce
         Assert(nonce == current_nonce),
         
@@ -70,10 +101,10 @@ def process_intent():
             App.globalGet(Bytes("creator_addr"))
         )),
         
-        # Increment nonce
-        App.globalPut(Bytes("creator_nonce"), current_nonce + Int(1)),
+        # Validate sufficient balance
+        validate_balance(total_amount),
         
-        # Send payment to merchant
+        # Execute payments (merchant first, then relayer)
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.AssetTransfer,
@@ -92,7 +123,15 @@ def process_intent():
         }),
         InnerTxnBuilder.Submit(),
         
-        Log(Concat(Bytes("payment_processed:"), Itob(amount))),
+        # FIXED: Increment nonce AFTER successful payment execution
+        App.globalPut(Bytes("creator_nonce"), current_nonce + Int(1)),
+        
+        Log(Concat(
+            Bytes("payment_processed:"),
+            Itob(amount),
+            Bytes(":nonce:"),
+            Itob(current_nonce + Int(1))
+        )),
     ])
 
 @Subroutine(TealType.none)
@@ -102,15 +141,16 @@ def setup_mandate_standard():
     dest_addr = Txn.application_args[1]
     amount = Btoi(Txn.application_args[2])
     interval_sec = Btoi(Txn.application_args[3])
-    start_ts = Btoi(Txn.application_args[4])  # Changed from next_pay_ts
+    start_ts = Btoi(Txn.application_args[4])
     relayer_fee = Btoi(Txn.application_args[5])
     expected_approval_hash = Txn.application_args[6]
     expected_clear_hash = Txn.application_args[7]
     signature = Txn.application_args[8]
     
-    # Construct message for signature verification
+    # FIXED: Add domain separation with contract address
     message = Concat(
         Bytes("MANDATE_V1:"),
+        Itob(Global.current_application_id()),  # Domain separation
         dest_addr,
         Itob(amount),
         Itob(interval_sec),
@@ -118,13 +158,26 @@ def setup_mandate_standard():
         Itob(relayer_fee)
     )
     
+    total_amount = amount + relayer_fee
+    
     return Seq([
+        # Input validation
+        Assert(Len(dest_addr) == Int(32)),  # Valid address
+        Assert(amount > Int(0)),  # Positive amount
+        Assert(interval_sec >= Int(3600)),  # Minimum 1 hour interval
+        Assert(start_ts > Global.latest_timestamp()),  # Future start
+        Assert(relayer_fee >= Int(0)),  # Non-negative fee
+        Assert(total_amount > amount),  # Overflow check
+        
         # Verify creator signature
         Assert(Ed25519Verify(
             Sha256(message),
             signature,
             App.globalGet(Bytes("creator_addr"))
         )),
+        
+        # Validate sufficient balance for initial payment
+        validate_balance(total_amount),
         
         # Call Strahn Core to deploy mandate
         InnerTxnBuilder.Begin(),
@@ -140,8 +193,6 @@ def setup_mandate_standard():
                 Itob(interval_sec),
                 Itob(start_ts),
                 Itob(relayer_fee),
-                Itob(App.globalGet(Bytes("usdc_id"))),
-                Itob(Global.current_application_id()),
             ],
         }),
         InnerTxnBuilder.Submit(),
@@ -174,12 +225,22 @@ def release_mandate_funds():
     relayer_fee = Btoi(Txn.application_args[3])
     
     caller_creator = AppParam.creator(Txn.sender())
+    total_amount = amount + relayer_fee
     
     return Seq([
+        # Input validation
+        Assert(Len(destination) == Int(32)),  # Valid address
+        Assert(amount > Int(0)),  # Positive amount
+        Assert(relayer_fee >= Int(0)),  # Non-negative fee
+        Assert(total_amount > amount),  # Overflow check
+        
         # Critical security check: only mandate contracts created by this PI Base can call this
         caller_creator,
         Assert(caller_creator.hasValue()),
         Assert(caller_creator.value() == Global.current_application_address()),
+        
+        # Validate sufficient balance
+        validate_balance(total_amount),
         
         # Execute payment to merchant
         InnerTxnBuilder.Begin(),
@@ -200,7 +261,12 @@ def release_mandate_funds():
         }),
         InnerTxnBuilder.Submit(),
         
-        Log(Concat(Bytes("mandate_payment_released:"), Itob(amount))),
+        Log(Concat(
+            Bytes("mandate_payment_released:"),
+            Itob(amount),
+            Bytes(":mandate:"),
+            Itob(Txn.sender())
+        )),
     ])
 
 def strahn_pi_base_approval():
@@ -224,6 +290,11 @@ def strahn_pi_base_approval():
     
     # Handle contract creation
     on_create = Seq([
+        # Input validation for creation
+        Assert(Len(Txn.application_args[0]) == Int(32)),  # Valid creator address
+        Assert(Btoi(Txn.application_args[1]) > Int(0)),   # Valid USDC asset ID
+        Assert(Btoi(Txn.application_args[2]) > Int(0)),   # Valid core app ID
+        
         App.globalPut(Bytes("creator_addr"), Txn.application_args[0]),
         App.globalPut(Bytes("usdc_id"), Btoi(Txn.application_args[1])),
         App.globalPut(Bytes("strahn_core_app_id"), Btoi(Txn.application_args[2])),

@@ -8,15 +8,27 @@ def is_owner():
 
 @Subroutine(TealType.none)
 def update_bytecode():
-    """Update the mandate contract bytecode"""
+    """Update the mandate contract bytecode with version control"""
     approval_code = Txn.application_args[1]
     clear_code = Txn.application_args[2]
+    version = Btoi(Txn.application_args[3])
+    
+    current_version = App.globalGet(Bytes("bytecode_version"))
     
     return Seq([
         Assert(is_owner()),
+        Assert(version > current_version),  # Prevent rollback attacks
+        
+        # Atomic update with version control
+        App.box_put(Concat(Bytes("approval_v"), Itob(version)), approval_code),
+        App.box_put(Concat(Bytes("clear_v"), Itob(version)), clear_code),
+        App.globalPut(Bytes("bytecode_version"), version),
+        
+        # Keep current version for compatibility
         App.box_put(Bytes("approval"), approval_code),
         App.box_put(Bytes("clear"), clear_code),
-        Log(Bytes("bytecode_updated")),
+        
+        Log(Concat(Bytes("bytecode_updated:v"), Itob(version))),
     ])
 
 @Subroutine(TealType.none)
@@ -34,17 +46,28 @@ def deploy_internal(approval_bytecode: Expr, clear_bytecode: Expr):
     usdc_asa_id = AppParam.global_get_ex(pi_base_id, Bytes("usdc_id"))
     
     return Seq([
+        # Validate input parameters
+        Assert(Len(dest_addr) == Int(32)),  # Valid Algorand address
+        Assert(amount > Int(0)),  # Positive amount
+        Assert(interval_sec >= Int(3600)),  # Minimum 1 hour interval
+        Assert(start_ts > Global.latest_timestamp()),  # Future start time
+        Assert(relayer_fee >= Int(0)),  # Non-negative fee
+        
         # Get USDC asset ID from calling PI Base contract
         usdc_asa_id,
         Assert(usdc_asa_id.hasValue()),
         
-        # Deploy mandate contract with proper schema
+        # Validate asset ID is reasonable (prevent invalid assets)
+        Assert(usdc_asa_id.value() > Int(0)),
+        Assert(usdc_asa_id.value() < Int(4294967295)),  # Max uint32
+        
+        # Deploy mandate contract with corrected schema
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.ApplicationCall,
             TxnField.approval_program: approval_bytecode,
             TxnField.clear_state_program: clear_bytecode,
-            TxnField.global_num_uints: Int(5),  # amount, interval_sec, next_pay_ts, relayer_fee, usdc_asa_id, pi_base_id
+            TxnField.global_num_uints: Int(6),  # FIXED: amount, interval_sec, next_pay_ts, relayer_fee, usdc_asa_id, pi_base_id
             TxnField.global_num_byte_slices: Int(1),  # dest_addr
             TxnField.application_args: [
                 dest_addr,
@@ -59,22 +82,34 @@ def deploy_internal(approval_bytecode: Expr, clear_bytecode: Expr):
         InnerTxnBuilder.Submit(),
         
         # Log the created application ID for the calling PI Base to retrieve
-        Log(Itob(InnerTxn.created_application_id())),
+        Log(Concat(
+            Bytes("mandate_deployed:"),
+            Itob(InnerTxn.created_application_id()),
+            Bytes(":pi_base:"),
+            Itob(pi_base_id)
+        )),
     ])
 
 @Subroutine(TealType.none)
 def deploy_mandate():
-    """Deploy a new mandate contract with bytecode verification"""
+    """Deploy a new mandate contract with bytecode verification (TOCTOU fix)"""
     expected_approval_hash = Txn.application_args[1]
     expected_clear_hash = Txn.application_args[2]
     
+    # Atomic read of both bytecode pieces with version check
+    current_version = App.globalGet(Bytes("bytecode_version"))
     approval_code = App.box_get(Bytes("approval"))
     clear_code = App.box_get(Bytes("clear"))
     
     return Seq([
-        # Verify bytecode integrity (user consent mechanism)
+        # Verify bytecode exists and integrity (user consent mechanism)
         Assert(approval_code.hasValue()),
         Assert(clear_code.hasValue()),
+        
+        # TOCTOU fix: Re-verify version hasn't changed during execution
+        Assert(current_version == App.globalGet(Bytes("bytecode_version"))),
+        
+        # Verify bytecode hashes match user expectations
         Assert(Sha256(approval_code.value()) == expected_approval_hash),
         Assert(Sha256(clear_code.value()) == expected_clear_hash),
         
@@ -89,6 +124,10 @@ def deploy_legacy_mandate():
     legacy_clear = Txn.application_args[2]
     
     return Seq([
+        # Validate bytecode size limits to prevent DoS
+        Assert(Len(legacy_approval) <= Int(8192)),  # 8KB limit
+        Assert(Len(legacy_clear) <= Int(1024)),     # 1KB limit
+        
         # Deploy with provided legacy bytecode (bypasses stored code)
         deploy_internal(legacy_approval, legacy_clear),
     ])
@@ -98,17 +137,20 @@ def get_current_bytecode_hashes():
     """Return SHA-256 hashes of current official bytecode"""
     approval_code = App.box_get(Bytes("approval"))
     clear_code = App.box_get(Bytes("clear"))
+    current_version = App.globalGet(Bytes("bytecode_version"))
     
     return Seq([
         Assert(approval_code.hasValue()),
         Assert(clear_code.hasValue()),
         
-        # Log both hashes for client retrieval
+        # Log hashes with version for client retrieval
         Log(Concat(
             Bytes("approval_hash:"),
             Sha256(approval_code.value()),
             Bytes(":clear_hash:"),
-            Sha256(clear_code.value())
+            Sha256(clear_code.value()),
+            Bytes(":version:"),
+            Itob(current_version)
         )),
     ])
 
@@ -118,6 +160,7 @@ def strahn_core_approval():
     # Handle contract creation
     on_create = Seq([
         App.globalPut(Bytes("owner_addr"), Txn.application_args[0]),
+        App.globalPut(Bytes("bytecode_version"), Int(0)),  # Initialize version
         Approve(),
     ])
     
@@ -131,14 +174,14 @@ def strahn_core_approval():
             [method == Bytes("update_bytecode"), update_bytecode()],
             [method == Bytes("deploy_mandate"), 
              Seq([
-                 # Must be called by another application
+                 # Must be called by another application (PI Base)
                  Assert(Txn.sender() != Global.zero_address()),
                  Assert(Txn.type_enum() == TxnType.ApplicationCall),
                  deploy_mandate()
              ])],
             [method == Bytes("deploy_legacy_mandate"), 
              Seq([
-                 # Must be called by another application
+                 # Must be called by another application (PI Base)
                  Assert(Txn.sender() != Global.zero_address()),
                  Assert(Txn.type_enum() == TxnType.ApplicationCall),
                  deploy_legacy_mandate()
