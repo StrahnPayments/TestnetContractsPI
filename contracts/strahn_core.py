@@ -43,7 +43,7 @@ def deploy_internal(approval_bytecode: Expr, clear_bytecode: Expr):
     
     # Get caller context
     pi_base_id = Txn.sender()  # The calling PI Base application ID
-    usdc_asa_id = AppParam.global_get_ex(pi_base_id, Bytes("usdc_id"))
+    usdc_asa_id = App.globalGetEx(pi_base_id, Bytes("usdc_id"))
     
     return Seq([
         # Validate input parameters
@@ -194,10 +194,10 @@ def strahn_core_approval():
     
     return Cond(
         [Txn.application_id() == Int(0), on_create],
-        [Txn.on_completion() == OnCall.NoOp, program],
-        [Txn.on_completion() == OnCall.UpdateApplication, 
+        [Txn.on_completion() == OnComplete.NoOp, program],
+        [Txn.on_completion() == OnComplete.UpdateApplication, 
          Seq([Assert(is_owner()), Approve()])],
-        [Txn.on_completion() == OnCall.DeleteApplication, 
+        [Txn.on_completion() == OnComplete.DeleteApplication, 
          Seq([Assert(is_owner()), Approve()])],
     )
 

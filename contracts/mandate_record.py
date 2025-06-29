@@ -12,9 +12,7 @@ def process_payment():
     new_next_payment = next_payment_time + interval_sec
     
     return Seq([
-        # FIXED: Add timestamp tolerance window (±5 minutes) to handle validator manipulation
-        Assert(current_time >= next_payment_time - Int(300)),  # Allow 5 min early
-        Assert(current_time <= next_payment_time + Int(300)),  # Allow 5 min late
+        Assert(current_time >= next_payment_time - Int(60))
         
         # Overflow protection
         Assert(new_next_payment > next_payment_time),  # Detect overflow
@@ -45,7 +43,7 @@ def process_payment():
             Itob(App.globalGet(Bytes("amount"))),
             Bytes(":next_payment:"),
             Itob(new_next_payment)
-        )),
+        ))
     ])
 
 def mandate_record_approval():
@@ -110,11 +108,11 @@ def mandate_record_approval():
     
     return Cond(
         [Txn.application_id() == Int(0), on_create],
-        [Txn.on_completion() == OnCall.NoOp, program],
+        [Txn.on_completion() == OnComplete.NoOp, program],
         # Mandate records are immutable once created - no updates allowed
-        [Txn.on_completion() == OnCall.UpdateApplication, Reject()],
+        [Txn.on_completion() == OnComplete.UpdateApplication, Reject()],
         # Deletion is allowed (for mandate cancellation by PI Base)
-        [Txn.on_completion() == OnCall.DeleteApplication, Approve()],
+        [Txn.on_completion() == OnComplete.DeleteApplication, Approve()],
     )
 
 def mandate_record_clear():

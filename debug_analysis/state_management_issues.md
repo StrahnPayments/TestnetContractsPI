@@ -11,7 +11,7 @@
 # PROBLEMATIC STRUCTURE:
 return Cond(
     [Txn.application_id() == Int(0), on_create],
-    [Txn.on_completion() == OnCall.NoOp, program],
+    [Txn.on_completion() == OnComplete.NoOp, program],
     # ...
 )
 ```

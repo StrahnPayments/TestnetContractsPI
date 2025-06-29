@@ -1,4 +1,4 @@
-from pyteal import *
+from pyteal import * # type: ignore
 from .utils.common import *
 
 @Subroutine(TealType.uint64)
@@ -304,10 +304,10 @@ def strahn_pi_base_approval():
     
     return Cond(
         [Txn.application_id() == Int(0), on_create],
-        [Txn.on_completion() == OnCall.NoOp, program],
-        [Txn.on_completion() == OnCall.UpdateApplication, 
+        [Txn.on_completion() == OnComplete.NoOp, program],
+        [Txn.on_completion() == OnComplete.UpdateApplication, 
          Seq([Assert(is_creator()), Approve()])],
-        [Txn.on_completion() == OnCall.DeleteApplication, 
+        [Txn.on_completion() == OnComplete.DeleteApplication, 
          Seq([Assert(is_creator()), Approve()])],
     )
 
