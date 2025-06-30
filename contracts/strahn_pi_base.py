@@ -1,5 +1,5 @@
 from pyteal import * # type: ignore
-from .utils.common import *
+from utils.common import *
 
 @Subroutine(TealType.uint64)
 def is_creator():

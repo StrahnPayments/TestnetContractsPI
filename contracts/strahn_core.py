@@ -97,18 +97,28 @@ def deploy_mandate():
     expected_approval_hash = Txn.application_args[1]
     expected_clear_hash = Txn.application_args[2]
     
-    # Atomic read of both bytecode pieces with version check
-    current_version = App.globalGet(Bytes("bytecode_version"))
+    # Just define the recipes
     approval_code = App.box_get(Bytes("approval"))
     clear_code = App.box_get(Bytes("clear"))
     
+    # A scratch variable to hold the version we read at the start
+    initial_version = ScratchVar(TealType.uint64)
+    
     return Seq([
-        # Verify bytecode exists and integrity (user consent mechanism)
+        # Store the current version at the beginning of execution
+        initial_version.store(App.globalGet(Bytes("bytecode_version"))),
+        
+        # Now execute the box reads
+        approval_code,
+        clear_code,
+
+        # Assert that the boxes have values
         Assert(approval_code.hasValue()),
         Assert(clear_code.hasValue()),
         
         # TOCTOU fix: Re-verify version hasn't changed during execution
-        Assert(current_version == App.globalGet(Bytes("bytecode_version"))),
+        # Compare the current version against the one we saved at the start.
+        Assert(initial_version.load() == App.globalGet(Bytes("bytecode_version"))),
         
         # Verify bytecode hashes match user expectations
         Assert(Sha256(approval_code.value()) == expected_approval_hash),
@@ -136,22 +146,27 @@ def deploy_legacy_mandate():
 @Subroutine(TealType.none)
 def get_current_bytecode_hashes():
     """Return SHA-256 hashes of current official bytecode"""
+    # Define the recipes
     approval_code = App.box_get(Bytes("approval"))
     clear_code = App.box_get(Bytes("clear"))
-    current_version = App.globalGet(Bytes("bytecode_version"))
     
     return Seq([
+        # Step 1: Execute the box_get operations. The results are now available.
+        approval_code,
+        clear_code,
+        
+        # Step 2: Assert that the values were found.
         Assert(approval_code.hasValue()),
         Assert(clear_code.hasValue()),
         
-        # Log hashes with version for client retrieval
+        # Step 3: Log the hashes. Now it's safe to use .value() and App.globalGet()
         Log(Concat(
             Bytes("approval_hash:"),
             Sha256(approval_code.value()),
             Bytes(":clear_hash:"),
             Sha256(clear_code.value()),
             Bytes(":version:"),
-            Itob(current_version)
+            Itob(App.globalGet(Bytes("bytecode_version"))) # Get the value directly here
         )),
     ])
 

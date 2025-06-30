@@ -1,5 +1,5 @@
 from pyteal import *
-from .utils.common import *
+from utils.common import *
 
 @Subroutine(TealType.none)
 def process_payment():
