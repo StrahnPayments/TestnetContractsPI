@@ -1,5 +1,5 @@
 from pyteal import *
-from .utils.common import *
+from utils.common import *
 
 @Subroutine(TealType.uint64)
 def is_owner():
@@ -42,7 +42,8 @@ def deploy_internal(approval_bytecode: Expr, clear_bytecode: Expr):
     relayer_fee = Btoi(Txn.application_args[7])
     
     # Get caller context
-    pi_base_id = Txn.sender()  # The calling PI Base application ID
+    # pi_base_id = Txn.sender()  # The calling PI Base application ID
+    pi_base_id = Txn.applications[1]
     usdc_asa_id = App.globalGetEx(pi_base_id, Bytes("usdc_id"))
     
     return Seq([
