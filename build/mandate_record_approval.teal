@@ -1,0 +1,215 @@
+#pragma version 8
+txn ApplicationID
+int 0
+==
+bnz main_l10
+txn OnCompletion
+int NoOp
+==
+bnz main_l7
+txn OnCompletion
+int UpdateApplication
+==
+bnz main_l6
+txn OnCompletion
+int DeleteApplication
+==
+bnz main_l5
+err
+main_l5:
+int 1
+return
+main_l6:
+int 0
+return
+main_l7:
+txn ApplicationID
+int 0
+!=
+assert
+txna ApplicationArgs 0
+byte "process_payment"
+==
+bnz main_l9
+err
+main_l9:
+callsub processpayment_0
+int 1
+return
+main_l10:
+txna ApplicationArgs 0
+len
+int 32
+==
+assert
+txna ApplicationArgs 1
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+int 3600
+>=
+assert
+txna ApplicationArgs 3
+btoi
+global LatestTimestamp
+>
+assert
+txna ApplicationArgs 4
+btoi
+int 0
+>=
+assert
+txna ApplicationArgs 5
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 6
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+int 31536000
+<=
+assert
+txna ApplicationArgs 3
+btoi
+int 4102444800
+<
+assert
+byte "dest_addr"
+txna ApplicationArgs 0
+app_global_put
+byte "amount"
+txna ApplicationArgs 1
+btoi
+app_global_put
+byte "interval_sec"
+txna ApplicationArgs 2
+btoi
+app_global_put
+byte "next_pay_ts"
+txna ApplicationArgs 3
+btoi
+app_global_put
+byte "relayer_fee"
+txna ApplicationArgs 4
+btoi
+app_global_put
+byte "usdc_asa_id"
+txna ApplicationArgs 5
+btoi
+app_global_put
+byte "pi_base_id"
+txna ApplicationArgs 6
+btoi
+app_global_put
+itxn_begin
+int axfer
+itxn_field TypeEnum
+txna ApplicationArgs 5
+btoi
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+int 0
+itxn_field AssetAmount
+itxn_submit
+byte "mandate_created:"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+byte ":interval:"
+concat
+txna ApplicationArgs 2
+btoi
+itob
+concat
+log
+int 1
+return
+
+// process_payment
+processpayment_0:
+proto 0 0
+global LatestTimestamp
+byte "next_pay_ts"
+app_global_get
+int 60
+-
+>=
+assert
+byte "next_pay_ts"
+app_global_get
+byte "interval_sec"
+app_global_get
++
+byte "next_pay_ts"
+app_global_get
+>
+assert
+byte "next_pay_ts"
+app_global_get
+byte "interval_sec"
+app_global_get
++
+int 4102444800
+<
+assert
+itxn_begin
+int appl
+itxn_field TypeEnum
+byte "pi_base_id"
+app_global_get
+itxn_field ApplicationID
+byte "release_mandate_funds"
+itxn_field ApplicationArgs
+byte "dest_addr"
+app_global_get
+itxn_field ApplicationArgs
+byte "amount"
+app_global_get
+itob
+itxn_field ApplicationArgs
+byte "relayer_fee"
+app_global_get
+itob
+itxn_field ApplicationArgs
+txn Sender
+itxn_field ApplicationArgs
+byte "usdc_asa_id"
+app_global_get
+itxn_field Assets
+byte "pi_base_id"
+app_global_get
+itxn_field Applications
+itxn_submit
+byte "next_pay_ts"
+byte "next_pay_ts"
+app_global_get
+byte "interval_sec"
+app_global_get
++
+app_global_put
+byte "mandate_payment_processed:"
+byte "amount"
+app_global_get
+itob
+concat
+byte ":next_payment:"
+concat
+byte "next_pay_ts"
+app_global_get
+byte "interval_sec"
+app_global_get
++
+itob
+concat
+log
+retsub

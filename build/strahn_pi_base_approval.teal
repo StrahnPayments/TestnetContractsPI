@@ -1,0 +1,536 @@
+#pragma version 8
+txn ApplicationID
+int 0
+==
+bnz main_l19
+txn OnCompletion
+int NoOp
+==
+bnz main_l7
+txn OnCompletion
+int UpdateApplication
+==
+bnz main_l6
+txn OnCompletion
+int DeleteApplication
+==
+bnz main_l5
+err
+main_l5:
+callsub iscreator_0
+assert
+int 1
+return
+main_l6:
+callsub iscreator_0
+assert
+int 1
+return
+main_l7:
+txn ApplicationID
+int 0
+!=
+assert
+txna ApplicationArgs 0
+byte "app_optin_usdc"
+==
+bnz main_l18
+txna ApplicationArgs 0
+byte "deposit_usdc"
+==
+bnz main_l17
+txna ApplicationArgs 0
+byte "process_intent"
+==
+bnz main_l16
+txna ApplicationArgs 0
+byte "setup_mandate_standard"
+==
+bnz main_l15
+txna ApplicationArgs 0
+byte "release_mandate_funds"
+==
+bnz main_l13
+err
+main_l13:
+callsub releasemandatefunds_6
+main_l14:
+int 1
+return
+main_l15:
+callsub setupmandatestandard_5
+b main_l14
+main_l16:
+callsub processintent_4
+b main_l14
+main_l17:
+callsub depositusdc_2
+b main_l14
+main_l18:
+callsub appoptinusdc_1
+b main_l14
+main_l19:
+txna ApplicationArgs 0
+len
+int 32
+==
+assert
+txna ApplicationArgs 1
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+byte "creator_addr"
+txna ApplicationArgs 0
+app_global_put
+byte "usdc_id"
+txna ApplicationArgs 1
+btoi
+app_global_put
+byte "strahn_core_app_id"
+txna ApplicationArgs 2
+btoi
+app_global_put
+byte "creator_nonce"
+int 0
+app_global_put
+int 1
+return
+
+// is_creator
+iscreator_0:
+proto 0 1
+txn Sender
+byte "creator_addr"
+app_global_get
+==
+retsub
+
+// app_optin_usdc
+appoptinusdc_1:
+proto 0 0
+txn Sender
+byte "creator_addr"
+app_global_get
+==
+assert
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "usdc_id"
+app_global_get
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+int 0
+itxn_field AssetAmount
+itxn_submit
+byte "usdc_optin_complete"
+log
+retsub
+
+// deposit_usdc
+depositusdc_2:
+proto 0 0
+global GroupSize
+int 2
+==
+assert
+txn GroupIndex
+int 1
+==
+assert
+txn GroupIndex
+int 1
+-
+int 0
+==
+assert
+txn GroupIndex
+int 1
+-
+gtxns TypeEnum
+int axfer
+==
+assert
+txn GroupIndex
+int 1
+-
+gtxns XferAsset
+byte "usdc_id"
+app_global_get
+==
+assert
+txn GroupIndex
+int 1
+-
+gtxns AssetReceiver
+global CurrentApplicationAddress
+==
+assert
+txn GroupIndex
+int 1
+-
+gtxns AssetAmount
+int 0
+>
+assert
+txn GroupIndex
+int 1
+-
+gtxns Sender
+txn Sender
+==
+assert
+byte "usdc_deposited:"
+txn GroupIndex
+int 1
+-
+gtxns AssetAmount
+itob
+concat
+log
+retsub
+
+// validate_balance
+validatebalance_3:
+proto 1 0
+global CurrentApplicationAddress
+byte "usdc_id"
+app_global_get
+asset_holding_get AssetBalance
+store 1
+store 0
+load 1
+assert
+load 0
+frame_dig -1
+>=
+assert
+retsub
+
+// process_intent
+processintent_4:
+proto 0 0
+txna ApplicationArgs 1
+len
+int 32
+==
+assert
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 3
+btoi
+int 0
+>=
+assert
+txna ApplicationArgs 2
+btoi
+txna ApplicationArgs 3
+btoi
++
+txna ApplicationArgs 2
+btoi
+>
+assert
+txna ApplicationArgs 4
+btoi
+byte "creator_nonce"
+app_global_get
+==
+assert
+byte "SPP_V1:"
+global CurrentApplicationID
+itob
+concat
+txna ApplicationArgs 4
+btoi
+itob
+concat
+txna ApplicationArgs 1
+concat
+txna ApplicationArgs 2
+btoi
+itob
+concat
+txna ApplicationArgs 3
+btoi
+itob
+concat
+sha256
+txna ApplicationArgs 5
+byte "creator_addr"
+app_global_get
+ed25519verify
+assert
+txna ApplicationArgs 2
+btoi
+txna ApplicationArgs 3
+btoi
++
+callsub validatebalance_3
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "usdc_id"
+app_global_get
+itxn_field XferAsset
+txna ApplicationArgs 1
+itxn_field AssetReceiver
+txna ApplicationArgs 2
+btoi
+itxn_field AssetAmount
+itxn_next
+int axfer
+itxn_field TypeEnum
+byte "usdc_id"
+app_global_get
+itxn_field XferAsset
+txn Sender
+itxn_field AssetReceiver
+txna ApplicationArgs 3
+btoi
+itxn_field AssetAmount
+itxn_submit
+byte "creator_nonce"
+byte "creator_nonce"
+app_global_get
+int 1
++
+app_global_put
+byte "payment_processed:"
+txna ApplicationArgs 2
+btoi
+itob
+concat
+byte ":nonce:"
+concat
+byte "creator_nonce"
+app_global_get
+int 1
++
+itob
+concat
+log
+retsub
+
+// setup_mandate_standard
+setupmandatestandard_5:
+proto 0 0
+txna ApplicationArgs 1
+len
+int 32
+==
+assert
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 3
+btoi
+int 3600
+>=
+assert
+txna ApplicationArgs 4
+btoi
+global LatestTimestamp
+>
+assert
+txna ApplicationArgs 5
+btoi
+int 0
+>=
+assert
+txna ApplicationArgs 2
+btoi
+txna ApplicationArgs 5
+btoi
++
+txna ApplicationArgs 2
+btoi
+>
+assert
+byte "MANDATE_V1:"
+global CurrentApplicationID
+itob
+concat
+txna ApplicationArgs 1
+concat
+txna ApplicationArgs 2
+btoi
+itob
+concat
+txna ApplicationArgs 3
+btoi
+itob
+concat
+txna ApplicationArgs 4
+btoi
+itob
+concat
+txna ApplicationArgs 5
+btoi
+itob
+concat
+sha256
+txna ApplicationArgs 8
+byte "creator_addr"
+app_global_get
+ed25519verify
+assert
+txna ApplicationArgs 2
+btoi
+txna ApplicationArgs 5
+btoi
++
+callsub validatebalance_3
+itxn_begin
+int appl
+itxn_field TypeEnum
+byte "strahn_core_app_id"
+app_global_get
+itxn_field ApplicationID
+byte "deploy_mandate"
+itxn_field ApplicationArgs
+txna ApplicationArgs 6
+itxn_field ApplicationArgs
+txna ApplicationArgs 7
+itxn_field ApplicationArgs
+txna ApplicationArgs 1
+itxn_field ApplicationArgs
+txna ApplicationArgs 2
+btoi
+itob
+itxn_field ApplicationArgs
+txna ApplicationArgs 3
+btoi
+itob
+itxn_field ApplicationArgs
+txna ApplicationArgs 4
+btoi
+itob
+itxn_field ApplicationArgs
+txna ApplicationArgs 5
+btoi
+itob
+itxn_field ApplicationArgs
+itxn_submit
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "usdc_id"
+app_global_get
+itxn_field XferAsset
+txna ApplicationArgs 1
+itxn_field AssetReceiver
+txna ApplicationArgs 2
+btoi
+itxn_field AssetAmount
+itxn_next
+int axfer
+itxn_field TypeEnum
+byte "usdc_id"
+app_global_get
+itxn_field XferAsset
+txn Sender
+itxn_field AssetReceiver
+txna ApplicationArgs 5
+btoi
+itxn_field AssetAmount
+itxn_submit
+byte "mandate_setup_complete"
+log
+retsub
+
+// release_mandate_funds
+releasemandatefunds_6:
+proto 0 0
+txna ApplicationArgs 1
+len
+int 32
+==
+assert
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 3
+btoi
+int 0
+>=
+assert
+txna ApplicationArgs 2
+btoi
+txna ApplicationArgs 3
+btoi
++
+txna ApplicationArgs 2
+btoi
+>
+assert
+txna ApplicationArgs 4
+len
+int 32
+==
+assert
+txna Applications 1
+app_params_get AppCreator
+store 3
+store 2
+load 3
+assert
+load 2
+global CurrentApplicationAddress
+==
+assert
+txna ApplicationArgs 2
+btoi
+txna ApplicationArgs 3
+btoi
++
+callsub validatebalance_3
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "usdc_id"
+app_global_get
+itxn_field XferAsset
+txna ApplicationArgs 1
+itxn_field AssetReceiver
+txna ApplicationArgs 2
+btoi
+itxn_field AssetAmount
+itxn_next
+int axfer
+itxn_field TypeEnum
+txna ApplicationArgs 4
+itxn_field AssetReceiver
+byte "usdc_id"
+app_global_get
+itxn_field XferAsset
+txna ApplicationArgs 3
+btoi
+itxn_field AssetAmount
+itxn_submit
+byte "mandate_payment_released:"
+txna ApplicationArgs 2
+btoi
+itob
+concat
+byte ":mandate:"
+concat
+txna Applications 1
+itob
+concat
+log
+retsub

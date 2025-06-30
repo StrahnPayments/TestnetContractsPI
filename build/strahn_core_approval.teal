@@ -1,0 +1,456 @@
+#pragma version 10
+txn ApplicationID
+int 0
+==
+bnz main_l21
+txn OnCompletion
+int NoOp
+==
+bnz main_l7
+txn OnCompletion
+int UpdateApplication
+==
+bnz main_l6
+txn OnCompletion
+int DeleteApplication
+==
+bnz main_l5
+err
+main_l5:
+callsub isowner_0
+assert
+int 1
+return
+main_l6:
+callsub isowner_0
+assert
+int 1
+return
+main_l7:
+txn ApplicationID
+int 0
+!=
+assert
+txna ApplicationArgs 0
+byte "set_bytecode"
+==
+bnz main_l20
+txna ApplicationArgs 0
+byte "set_version"
+==
+bnz main_l19
+txna ApplicationArgs 0
+byte "append_bytecode"
+==
+bnz main_l18
+txna ApplicationArgs 0
+byte "deploy_mandate"
+==
+bnz main_l17
+txna ApplicationArgs 0
+byte "deploy_legacy_mandate"
+==
+bnz main_l16
+txna ApplicationArgs 0
+byte "get_current_bytecode_hashes"
+==
+bnz main_l14
+err
+main_l14:
+callsub getcurrentbytecodehashes_7
+main_l15:
+int 1
+return
+main_l16:
+txn Sender
+global ZeroAddress
+!=
+assert
+txn TypeEnum
+int appl
+==
+assert
+callsub deploylegacymandate_6
+b main_l15
+main_l17:
+txn Sender
+global ZeroAddress
+!=
+assert
+txn TypeEnum
+int appl
+==
+assert
+callsub deploymandate_5
+b main_l15
+main_l18:
+callsub appendbytecode_2
+b main_l15
+main_l19:
+callsub setversion_3
+b main_l15
+main_l20:
+callsub setbytecode_1
+b main_l15
+main_l21:
+byte "owner_addr"
+txna ApplicationArgs 0
+app_global_put
+byte "bytecode_version"
+int 0
+app_global_put
+int 1
+return
+
+// is_owner
+isowner_0:
+proto 0 1
+txn Sender
+byte "owner_addr"
+app_global_get
+==
+retsub
+
+// set_bytecode
+setbytecode_1:
+proto 0 0
+callsub isowner_0
+assert
+txna ApplicationArgs 1
+byte "approval"
+==
+txna ApplicationArgs 1
+byte "clear"
+==
+||
+assert
+txna ApplicationArgs 1
+box_del
+pop
+txna ApplicationArgs 1
+txna ApplicationArgs 2
+btoi
+box_create
+pop
+txna ApplicationArgs 1
+int 0
+txn Note
+box_replace
+byte "set_bytecode_complete:"
+txna ApplicationArgs 1
+concat
+log
+retsub
+
+// append_bytecode
+appendbytecode_2:
+proto 0 0
+callsub isowner_0
+assert
+txna ApplicationArgs 1
+byte "approval"
+==
+txna ApplicationArgs 1
+byte "clear"
+==
+||
+assert
+txna ApplicationArgs 1
+box_len
+store 1
+store 0
+load 1
+assert
+load 0
+store 2
+load 2
+txn Note
+len
++
+store 3
+txna ApplicationArgs 1
+load 3
+box_resize
+txna ApplicationArgs 1
+load 2
+txn Note
+box_replace
+byte "append_bytecode_complete:"
+txna ApplicationArgs 1
+concat
+log
+retsub
+
+// set_version
+setversion_3:
+proto 0 0
+callsub isowner_0
+assert
+txna ApplicationArgs 1
+btoi
+byte "bytecode_version"
+app_global_get
+>
+assert
+byte "approval"
+byte "approval_v"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+callsub copybox_8
+byte "clear"
+byte "clear_v"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+callsub copybox_8
+byte "bytecode_version"
+txna ApplicationArgs 1
+btoi
+app_global_put
+byte "version_set:v"
+txna ApplicationArgs 1
+btoi
+itob
+concat
+log
+retsub
+
+// deploy_internal
+deployinternal_4:
+proto 2 0
+txna ApplicationArgs 3
+len
+int 32
+==
+assert
+txna ApplicationArgs 4
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 5
+btoi
+int 3600
+>=
+assert
+txna ApplicationArgs 6
+btoi
+global LatestTimestamp
+>
+assert
+txna ApplicationArgs 7
+btoi
+int 0
+>=
+assert
+txna Applications 1
+byte "usdc_id"
+app_global_get_ex
+store 16
+store 15
+load 16
+assert
+load 15
+int 0
+>
+assert
+load 15
+int 4294967295
+<
+assert
+itxn_begin
+int appl
+itxn_field TypeEnum
+frame_dig -2
+itxn_field ApprovalProgram
+frame_dig -1
+itxn_field ClearStateProgram
+int 6
+itxn_field GlobalNumUint
+int 1
+itxn_field GlobalNumByteSlice
+txna ApplicationArgs 3
+itxn_field ApplicationArgs
+txna ApplicationArgs 4
+btoi
+itob
+itxn_field ApplicationArgs
+txna ApplicationArgs 5
+btoi
+itob
+itxn_field ApplicationArgs
+txna ApplicationArgs 6
+btoi
+itob
+itxn_field ApplicationArgs
+txna ApplicationArgs 7
+btoi
+itob
+itxn_field ApplicationArgs
+load 15
+itob
+itxn_field ApplicationArgs
+txna Applications 1
+itob
+itxn_field ApplicationArgs
+itxn_submit
+byte "mandate_deployed:"
+itxn CreatedApplicationID
+itob
+concat
+byte ":pi_base:"
+concat
+txna Applications 1
+itob
+concat
+log
+retsub
+
+// deploy_mandate
+deploymandate_5:
+proto 0 0
+byte "bytecode_version"
+app_global_get
+store 14
+byte "approval"
+box_get
+store 11
+store 10
+byte "clear"
+box_get
+store 13
+store 12
+load 11
+assert
+load 13
+assert
+load 14
+byte "bytecode_version"
+app_global_get
+==
+assert
+load 10
+sha256
+txna ApplicationArgs 1
+==
+assert
+load 12
+sha256
+txna ApplicationArgs 2
+==
+assert
+load 10
+load 12
+callsub deployinternal_4
+retsub
+
+// deploy_legacy_mandate
+deploylegacymandate_6:
+proto 0 0
+txna ApplicationArgs 1
+len
+int 8192
+<=
+assert
+txna ApplicationArgs 2
+len
+int 1024
+<=
+assert
+txna ApplicationArgs 1
+txna ApplicationArgs 2
+callsub deployinternal_4
+retsub
+
+// get_current_bytecode_hashes
+getcurrentbytecodehashes_7:
+proto 0 0
+byte "approval"
+box_get
+store 18
+store 17
+byte "clear"
+box_get
+store 20
+store 19
+load 18
+assert
+load 20
+assert
+byte "approval_hash:"
+load 17
+sha256
+concat
+byte ":clear_hash:"
+concat
+load 19
+sha256
+concat
+byte ":version:"
+concat
+byte "bytecode_version"
+app_global_get
+itob
+concat
+log
+retsub
+
+// copy_box
+copybox_8:
+proto 2 0
+frame_dig -2
+box_len
+store 5
+store 4
+load 5
+assert
+load 4
+store 8
+frame_dig -1
+box_del
+pop
+frame_dig -1
+load 8
+box_create
+pop
+int 0
+store 6
+copybox_8_l1:
+load 6
+load 8
+<
+bz copybox_8_l6
+int 1024
+load 8
+load 6
+-
+<
+bnz copybox_8_l5
+load 8
+load 6
+-
+store 9
+copybox_8_l4:
+frame_dig -2
+load 6
+load 9
+box_extract
+store 7
+frame_dig -1
+load 6
+load 7
+box_replace
+load 6
+int 1024
++
+store 6
+b copybox_8_l1
+copybox_8_l5:
+int 1024
+store 9
+b copybox_8_l4
+copybox_8_l6:
+retsub
