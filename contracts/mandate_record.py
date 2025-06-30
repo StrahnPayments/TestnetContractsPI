@@ -12,7 +12,7 @@ def process_payment():
     new_next_payment = next_payment_time + interval_sec
     
     return Seq([
-        Assert(current_time >= next_payment_time - Int(60))
+        Assert(current_time >= next_payment_time - Int(60)),
         
         # Overflow protection
         Assert(new_next_payment > next_payment_time),  # Detect overflow
@@ -28,6 +28,7 @@ def process_payment():
                 App.globalGet(Bytes("dest_addr")),
                 Itob(App.globalGet(Bytes("amount"))),
                 Itob(App.globalGet(Bytes("relayer_fee"))),
+                Txn.sender(),
             ],
             TxnField.assets: [App.globalGet(Bytes("usdc_asa_id"))],
             TxnField.applications: [App.globalGet(Bytes("pi_base_id"))],

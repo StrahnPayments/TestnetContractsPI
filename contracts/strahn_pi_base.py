@@ -217,25 +217,34 @@ def setup_mandate_standard():
         Log(Bytes("mandate_setup_complete")),
     ])
 
+# In strahn_pi_base.py
+
 @Subroutine(TealType.none)
-def release_mandate_funds():
+def release_mandate_funds():    
     """Release funds for mandate payment - can only be called by created mandate contracts"""
     destination = Txn.application_args[1]
     amount = Btoi(Txn.application_args[2])
     relayer_fee = Btoi(Txn.application_args[3])
+    relayer_addr = Txn.application_args[4]
+    # THE FIX IS HERE:
+    # Txn.sender() is the address of the calling mandate contract.
+    # Txn.applications[1] is the ID of the calling mandate contract.
+    # AppParam.creator requires the ID.
+    caller_app_id = Txn.applications[1]
+    caller_creator = AppParam.creator(caller_app_id) # Pass the uint64 ID
     
-    caller_creator = AppParam.creator(Txn.sender())
     total_amount = amount + relayer_fee
     
     return Seq([
         # Input validation
-        Assert(Len(destination) == Int(32)),  # Valid address
-        Assert(amount > Int(0)),  # Positive amount
-        Assert(relayer_fee >= Int(0)),  # Non-negative fee
-        Assert(total_amount > amount),  # Overflow check
+        Assert(Len(destination) == Int(32)),
+        Assert(amount > Int(0)),
+        Assert(relayer_fee >= Int(0)),
+        Assert(total_amount > amount),
+        Assert(Len(relayer_addr) == Int(32)),
         
         # Critical security check: only mandate contracts created by this PI Base can call this
-        caller_creator,
+        caller_creator, # Execute the AppParam.creator call
         Assert(caller_creator.hasValue()),
         Assert(caller_creator.value() == Global.current_application_address()),
         
@@ -255,8 +264,9 @@ def release_mandate_funds():
         # Execute payment to relayer
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.AssetTransfer,
+            TxnField.asset_receiver: relayer_addr, # Pay the relayer fee to the Txn.sender(), which is sender of the original Mandate processing transaction
+                                                   # This is likely another bug. The fee should go to the relayer who called the mandate.
             TxnField.xfer_asset: App.globalGet(Bytes("usdc_id")),
-            TxnField.asset_receiver: Txn.sender(),
             TxnField.asset_amount: relayer_fee,
         }),
         InnerTxnBuilder.Submit(),
@@ -265,7 +275,7 @@ def release_mandate_funds():
             Bytes("mandate_payment_released:"),
             Itob(amount),
             Bytes(":mandate:"),
-            Itob(Txn.sender())
+            Itob(caller_app_id) # Log the ID of the mandate, not the address.
         )),
     ])
 
